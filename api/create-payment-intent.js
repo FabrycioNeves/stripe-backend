@@ -15,17 +15,19 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: "Stripe key missing" });
     }
 
-    const { amount } = req.body;
+    const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
+    const { amount } = body;
+
     if (!amount) return res.status(400).json({ error: "Amount is required" });
 
     const paymentIntent = await stripe.paymentIntents.create({
       amount,
-      currency: "usd", // ou "brl"
+      currency: "brl", // ou "usd"
     });
 
-    res.status(200).json({ clientSecret: paymentIntent.client_secret });
+    return res.status(200).json({ clientSecret: paymentIntent.client_secret });
   } catch (err) {
     console.error("❌ Erro no endpoint:", err);
-    res.status(500).json({ error: "Internal Server Error" });
+    return res.status(500).json({ error: err.message });
   }
 }
