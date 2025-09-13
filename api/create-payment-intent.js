@@ -16,13 +16,17 @@ export default async function handler(req, res) {
     }
 
     const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
-    const { amount } = body;
+    const { amount, userId } = body;
 
     if (!amount) return res.status(400).json({ error: "Amount is required" });
+    if (!userId) return res.status(400).json({ error: "User ID is required" });
 
     const paymentIntent = await stripe.paymentIntents.create({
       amount,
       currency: "brl", // ou "usd"
+      metadata: {
+        userId, // <-- aqui você passa o UID do usuário
+      },
     });
 
     return res.status(200).json({ clientSecret: paymentIntent.client_secret });
