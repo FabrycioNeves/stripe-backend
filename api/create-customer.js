@@ -1,4 +1,3 @@
-// api/create-customer.js
 import Stripe from "stripe";
 import admin from "firebase-admin";
 
@@ -41,12 +40,7 @@ export default async function handler(req, res) {
     });
 
     // Salva o customerId no Firestore
-    await userRef.set(
-      {
-        customerId: customer.id,
-      },
-      { merge: true }
-    );
+    await userRef.set({ customerId: customer.id }, { merge: true });
 
     return res.status(200).json({ customerId: customer.id });
   } catch (err) {

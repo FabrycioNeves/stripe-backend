@@ -1,7 +1,8 @@
-// api/create-subscription.js
 import Stripe from "stripe";
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
+  apiVersion: "2023-10-16",
+});
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
@@ -11,31 +12,19 @@ export default async function handler(req, res) {
 
   try {
     const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
-    const { userId, email, priceId } = body;
-    // priceId = ID do preço recorrente criado no Stripe Dashboard (ex: price_12345)
+    const { userId, customerId, priceId } = body;
 
-    if (!userId) return res.status(400).json({ error: "User ID is required" });
+    if (!customerId)
+      return res.status(400).json({ error: "customerId is required" });
     if (!priceId)
       return res.status(400).json({ error: "Price ID is required" });
 
-    // 1. Verifica ou cria Customer no Stripe
-    let customers = await stripe.customers.list({ email, limit: 1 });
-    let customer = customers.data[0];
-
-    if (!customer) {
-      customer = await stripe.customers.create({
-        email,
-        metadata: { userId },
-      });
-    }
-
-    // 2. Cria a assinatura
     const subscription = await stripe.subscriptions.create({
-      customer: customer.id,
+      customer: customerId,
       items: [{ price: priceId }],
       payment_behavior: "default_incomplete",
       expand: ["latest_invoice.payment_intent"],
-      metadata: { userId }, // 👈 ESSENCIAL
+      metadata: { userId },
     });
 
     return res.status(200).json({
