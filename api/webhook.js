@@ -7,7 +7,7 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
   apiVersion: "2023-10-16",
 });
 
-// Inicializa Firebase Admin (uma vez)
+// Inicializa Firebase Admin apenas uma vez
 if (!admin.apps.length) {
   const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
   admin.initializeApp({
@@ -36,68 +36,73 @@ export default async function handler(req, res) {
   }
 
   try {
-    // Trate os eventos que você precisa
     switch (event.type) {
-      case "payment_intent.succeeded": {
-        const pi = event.data.object;
-        const userId = pi.metadata?.userId;
+      // 👉 Assinatura criada ou atualizada (mas ainda pode estar incomplete)
+      case "customer.subscription.created":
+      case "customer.subscription.updated": {
+        const subscription = event.data.object;
+        const userId = subscription.metadata?.userId || null;
+
+        if (userId) {
+          await admin.firestore().collection("users").doc(userId).set(
+            {
+              subscriptionId: subscription.id,
+              subscriptionStatus: subscription.status,
+              customerId: subscription.customer,
+            },
+            { merge: true }
+          );
+          console.log(
+            `🔁 Subscription created/updated for ${userId}: ${subscription.status}`
+          );
+        }
+        break;
+      }
+
+      // 👉 Pagamento da fatura bem-sucedido (marcar premium)
+      case "invoice.payment_succeeded": {
+        const invoice = event.data.object;
+        const subscriptionId = invoice.subscription;
+
+        if (!subscriptionId) break;
+
+        // Busca a assinatura para pegar o userId
+        const subscription = await stripe.subscriptions.retrieve(
+          subscriptionId
+        );
+        const userId = subscription.metadata?.userId;
+
         if (userId) {
           await admin.firestore().collection("users").doc(userId).set(
             {
               premium: true,
+              subscriptionStatus: subscription.status,
               premiumSince: admin.firestore.FieldValue.serverTimestamp(),
             },
             { merge: true }
           );
           console.log(
-            `✅ Usuário ${userId} marcado como premium (payment_intent.succeeded)`
-          );
-        } else {
-          console.warn("payment_intent.succeeded sem metadata.userId");
-        }
-        break;
-      }
-
-      case "customer.subscription.created":
-      case "customer.subscription.updated": {
-        const subscription = event.data.object;
-        // se você gravou metadata na subscription com userId, use:
-        const userId = subscription.metadata?.userId;
-        if (userId) {
-          const isActive = subscription.status === "active";
-          await admin
-            .firestore()
-            .collection("users")
-            .doc(userId)
-            .set(
-              {
-                premium: isActive,
-                subscriptionId: subscription.id,
-                subscriptionStatus: subscription.status,
-                premiumSince: isActive
-                  ? admin.firestore.FieldValue.serverTimestamp()
-                  : null,
-              },
-              { merge: true }
-            );
-          console.log(
-            `🔁 Subscription update for ${userId}: ${subscription.status}`
+            `✅ Usuário ${userId} marcado como premium (pagamento da assinatura)`
           );
         }
         break;
       }
 
+      // 👉 Assinatura cancelada ou falha no pagamento
       case "customer.subscription.deleted":
       case "invoice.payment_failed": {
-        // invoice.payment_failed: pode indicar cancelamento por falta de pagamento
         const obj = event.data.object;
-        // invoice has customer etc; subscription has metadata etc.
-        const userId =
-          obj.metadata?.userId || obj.customer_metadata?.userId || obj.customer; // fallback
+        const subscriptionId = obj.subscription || obj.id;
+        const subscription = await stripe.subscriptions
+          .retrieve(subscriptionId)
+          .catch(() => null);
+        const userId = subscription?.metadata?.userId || null;
+
         if (userId) {
           await admin.firestore().collection("users").doc(userId).set(
             {
               premium: false,
+              subscriptionStatus: "canceled",
               premiumCanceledAt: admin.firestore.FieldValue.serverTimestamp(),
             },
             { merge: true }
@@ -105,8 +110,6 @@ export default async function handler(req, res) {
           console.log(
             `⚠️ Premium removido do usuário ${userId} devido a ${event.type}`
           );
-        } else {
-          console.warn(`${event.type} sem metadata.userId`);
         }
         break;
       }
