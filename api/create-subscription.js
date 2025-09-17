@@ -28,17 +28,17 @@ export default async function handler(req, res) {
         .json({ error: "userId, customerId e priceId são obrigatórios" });
     }
 
+    // Cria subscription
     const subscription = await stripe.subscriptions.create({
       customer: customerId,
       items: [{ price: priceId }],
-      payment_behavior: "default_incomplete", // permite coletar pagamento com PaymentIntent
-      metadata: { userId }, // <- ESSENCIAL para o webhook identificar o usuário
+      payment_behavior: "default_incomplete",
+      metadata: { userId }, // ESSENCIAL para webhook identificar o usuário
       expand: ["latest_invoice.payment_intent"],
     });
 
-    // Opcional: salvar dados iniciais da subscription no Firestore (não define premium aqui)
-    const userRef = admin.firestore().collection("users").doc(userId);
-    await userRef.set(
+    // Salva dados iniciais no Firestore (não marca premium ainda)
+    await admin.firestore().collection("users").doc(userId).set(
       {
         subscriptionId: subscription.id,
         subscriptionStatus: subscription.status,
@@ -48,16 +48,17 @@ export default async function handler(req, res) {
       { merge: true }
     );
 
+    // Retorna clientSecret da primeira invoice para o frontend
     const clientSecret =
       subscription.latest_invoice?.payment_intent?.client_secret || null;
 
-    return res.status(200).json({
-      clientSecret,
+    res.status(200).json({
       subscriptionId: subscription.id,
       subscriptionStatus: subscription.status,
+      clientSecret,
     });
   } catch (err) {
     console.error("❌ Erro ao criar assinatura:", err);
-    return res.status(500).json({ error: err.message });
+    res.status(500).json({ error: err.message });
   }
 }
