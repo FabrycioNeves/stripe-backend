@@ -1,3 +1,4 @@
+// api/create-customer.js
 import Stripe from "stripe";
 import admin from "firebase-admin";
 
@@ -19,30 +20,35 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { userId, email } = req.body;
+    const { userId, email } =
+      typeof req.body === "string" ? JSON.parse(req.body) : req.body;
 
     if (!userId || !email) {
       return res.status(400).json({ error: "userId e email são obrigatórios" });
     }
 
-    // Verifica se já existe customerId no Firestore
     const userRef = admin.firestore().collection("users").doc(userId);
     const userDoc = await userRef.get();
 
+    let customerId;
+
     if (userDoc.exists && userDoc.data().customerId) {
-      return res.status(200).json({ customerId: userDoc.data().customerId });
+      // Se já existe, usa o mesmo
+      customerId = userDoc.data().customerId;
+    } else {
+      // Se não existe, cria no Stripe
+      const customer = await stripe.customers.create({
+        email,
+        metadata: { userId },
+      });
+
+      customerId = customer.id;
+
+      // Salva no Firestore
+      await userRef.set({ customerId }, { merge: true });
     }
 
-    // Cria um novo customer no Stripe
-    const customer = await stripe.customers.create({
-      email,
-      metadata: { userId },
-    });
-
-    // Salva o customerId no Firestore
-    await userRef.set({ customerId: customer.id }, { merge: true });
-
-    return res.status(200).json({ customerId: customer.id });
+    return res.status(200).json({ customerId });
   } catch (err) {
     console.error("❌ Erro ao criar customer:", err);
     return res.status(500).json({ error: err.message });
