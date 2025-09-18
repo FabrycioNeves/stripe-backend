@@ -31,9 +31,8 @@ export default async function handler(req, res) {
     const buf = await buffer(req);
     const sig = req.headers["stripe-signature"];
 
-    // ⚡️ Forçar para string garante consistência em Vercel/Next
     event = stripe.webhooks.constructEvent(
-      buf.toString(),
+      buf, // ⚡️ passa Buffer cru
       sig,
       process.env.STRIPE_WEBHOOK_SECRET
     );
