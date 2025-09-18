@@ -46,39 +46,35 @@ export default async function handler(req, res) {
 
         await admin.firestore().collection("users").doc(userId).set(
           {
-            premium: true,
+            subscriptionId: subscription.id,
             subscriptionStatus: subscription.status,
-            premiumSince: admin.firestore.FieldValue.serverTimestamp(),
-          },
-          { merge: true }
-        );
-
-        console.log(`✅ Usuário ${userId} marcado como premium`);
-        break;
-      }
-
-      case "invoice.payment_failed":
-      case "customer.subscription.deleted": {
-        const obj = event.data.object;
-        const subscriptionId = obj.subscription || obj.id;
-        const subscription = await stripe.subscriptions
-          .retrieve(subscriptionId)
-          .catch(() => null);
-        const userId = subscription?.metadata?.userId;
-        if (!userId) break;
-
-        await admin.firestore().collection("users").doc(userId).set(
-          {
-            premium: false,
-            subscriptionStatus: "canceled",
-            premiumCanceledAt: admin.firestore.FieldValue.serverTimestamp(),
+            lastInvoiceId: invoice.id,
+            lastPayment: admin.firestore.FieldValue.serverTimestamp(),
           },
           { merge: true }
         );
 
         console.log(
-          `⚠️ Premium removido do usuário ${userId} devido a ${event.type}`
+          `✅ Subscription atualizada para ${subscription.status} (user: ${userId})`
         );
+        break;
+      }
+
+      case "invoice.payment_failed":
+      case "customer.subscription.deleted": {
+        const subscription = event.data.object;
+        const userId = subscription.metadata?.userId;
+        if (!userId) break;
+
+        await admin.firestore().collection("users").doc(userId).set(
+          {
+            subscriptionStatus: "canceled",
+            canceledAt: admin.firestore.FieldValue.serverTimestamp(),
+          },
+          { merge: true }
+        );
+
+        console.log(`⚠️ Subscription cancelada para user ${userId}`);
         break;
       }
 
