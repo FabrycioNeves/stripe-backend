@@ -9,9 +9,7 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
 
 // Desabilita bodyParser porque precisamos do raw body
 export const config = {
-  api: {
-    bodyParser: false,
-  },
+  api: { bodyParser: false },
 };
 
 // Inicializa Firebase Admin
@@ -26,13 +24,14 @@ export default async function handler(req, res) {
   }
 
   let event;
+  let buf;
 
   try {
-    const buf = await buffer(req);
+    buf = await buffer(req);
     const sig = req.headers["stripe-signature"];
 
     event = stripe.webhooks.constructEvent(
-      buf, // ⚡️ passa Buffer cru
+      buf, // ⚡️ raw buffer
       sig,
       process.env.STRIPE_WEBHOOK_SECRET
     );
@@ -40,11 +39,19 @@ export default async function handler(req, res) {
     console.error("❌ Webhook signature failed:", err.message, {
       sig: req.headers["stripe-signature"],
       secret: process.env.STRIPE_WEBHOOK_SECRET ? "definido" : "NÃO definido",
+      bodyLength: buf ? buf.length : 0,
     });
     return res.status(400).send(`Webhook Error: ${err.message}`);
   }
 
   try {
+    const subscriptionEvents = [
+      "invoice.payment_succeeded",
+      "invoice.payment_failed",
+      "customer.subscription.deleted",
+      "customer.subscription.updated",
+    ];
+
     switch (event.type) {
       case "invoice.payment_succeeded": {
         const invoice = event.data.object;
@@ -55,7 +62,14 @@ export default async function handler(req, res) {
           subscriptionId
         );
         const userId = subscription.metadata?.userId;
-        if (!userId) break;
+
+        if (!userId) {
+          console.warn(
+            "⚠️ Nenhum userId encontrado na subscription:",
+            subscription
+          );
+          break;
+        }
 
         await admin.firestore().collection("users").doc(userId).set(
           {
@@ -73,11 +87,47 @@ export default async function handler(req, res) {
         break;
       }
 
-      case "invoice.payment_failed":
+      case "invoice.payment_failed": {
+        const invoice = event.data.object;
+        const subscriptionId = invoice.subscription;
+        if (!subscriptionId) break;
+
+        const subscription = await stripe.subscriptions.retrieve(
+          subscriptionId
+        );
+        const userId = subscription.metadata?.userId;
+
+        if (!userId) {
+          console.warn(
+            "⚠️ Nenhum userId encontrado na subscription:",
+            subscription
+          );
+          break;
+        }
+
+        await admin.firestore().collection("users").doc(userId).set(
+          {
+            subscriptionStatus: "payment_failed",
+            lastPaymentFailedAt: admin.firestore.FieldValue.serverTimestamp(),
+          },
+          { merge: true }
+        );
+
+        console.log(`⚠️ Payment failed para user ${userId}`);
+        break;
+      }
+
       case "customer.subscription.deleted": {
         const subscription = event.data.object;
         const userId = subscription.metadata?.userId;
-        if (!userId) break;
+
+        if (!userId) {
+          console.warn(
+            "⚠️ Nenhum userId encontrado na subscription:",
+            subscription
+          );
+          break;
+        }
 
         await admin.firestore().collection("users").doc(userId).set(
           {
@@ -88,6 +138,32 @@ export default async function handler(req, res) {
         );
 
         console.log(`⚠️ Subscription cancelada para user ${userId}`);
+        break;
+      }
+
+      case "customer.subscription.updated": {
+        const subscription = event.data.object;
+        const userId = subscription.metadata?.userId;
+
+        if (!userId) {
+          console.warn(
+            "⚠️ Nenhum userId encontrado na subscription:",
+            subscription
+          );
+          break;
+        }
+
+        await admin.firestore().collection("users").doc(userId).set(
+          {
+            subscriptionStatus: subscription.status,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          },
+          { merge: true }
+        );
+
+        console.log(
+          `🔄 Subscription atualizada para ${subscription.status} (user: ${userId})`
+        );
         break;
       }
 
