@@ -34,36 +34,37 @@ export default async function handler(req, res) {
 
   try {
     switch (event.type) {
+      // Pagamento bem-sucedido ou assinatura atualizada
       case "invoice.payment_succeeded":
       case "customer.subscription.updated": {
         const subscription = event.data.object;
         const userId = subscription.metadata?.userId;
         if (!userId) break;
 
-        let updates = {
+        const updates = {
           subscriptionStatus: subscription.status,
+          premium: subscription.status === "active", // ✅ Premium ativo apenas se active
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         };
-
-        // Marcar premium se status active
-        if (subscription.status === "active") updates.premium = true;
 
         await admin
           .firestore()
           .collection("users")
           .doc(userId)
           .set(updates, { merge: true });
+
         console.log(`✅ Subscription atualizada (user: ${userId}):`, updates);
         break;
       }
 
+      // Pagamento falhou ou assinatura deletada
       case "customer.subscription.deleted":
       case "invoice.payment_failed": {
         const subscription = event.data.object;
         const userId = subscription.metadata?.userId;
         if (!userId) break;
 
-        let updates = {
+        const updates = {
           subscriptionStatus: "canceled",
           premium: false,
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -74,7 +75,10 @@ export default async function handler(req, res) {
           .collection("users")
           .doc(userId)
           .set(updates, { merge: true });
-        console.log(`⚠️ Subscription cancelada (user: ${userId})`);
+
+        console.log(
+          `⚠️ Subscription cancelada ou falha de pagamento (user: ${userId})`
+        );
         break;
       }
 
