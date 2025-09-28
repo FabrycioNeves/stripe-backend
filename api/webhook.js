@@ -34,35 +34,62 @@ export default async function handler(req, res) {
 
   try {
     switch (event.type) {
-      // Pagamento bem-sucedido ou assinatura atualizada
       case "invoice.payment_succeeded":
       case "customer.subscription.updated": {
         const subscription = event.data.object;
         const userId = subscription.metadata?.userId;
         if (!userId) break;
 
-        const updates = {
+        const ref = admin.firestore().collection("users").doc(userId);
+        const snap = await ref.get();
+
+        // Ignora webhook se o usuário não existe no Firestore
+        if (!snap.exists) {
+          console.log(`⚠️ Ignorando webhook: userId ${userId} não existe`);
+          break;
+        }
+
+        let updates = {
           subscriptionStatus: subscription.status,
-          premium: subscription.status === "active", // ✅ Premium ativo apenas se active
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         };
 
-        await admin
-          .firestore()
-          .collection("users")
-          .doc(userId)
-          .set(updates, { merge: true });
+        // Premium = true se assinatura ativa ou em trial
+        if (
+          subscription.status === "active" ||
+          subscription.status === "trialing"
+        ) {
+          updates.premium = true;
+        }
+        // Premium = false se cancelada ou pagamento falhou de forma definitiva
+        else if (
+          ["canceled", "unpaid", "payment_failed"].includes(subscription.status)
+        ) {
+          updates.premium = false;
+        }
+        // Status intermediário → mantém o valor atual do Firestore
+        else {
+          updates.premium = snap.data().premium;
+        }
 
-        console.log(`✅ Subscription atualizada (user: ${userId}):`, updates);
+        await ref.set(updates, { merge: true });
+        console.log(`✅ Subscription processada (user: ${userId}):`, updates);
         break;
       }
 
-      // Pagamento falhou ou assinatura deletada
       case "customer.subscription.deleted":
       case "invoice.payment_failed": {
         const subscription = event.data.object;
         const userId = subscription.metadata?.userId;
         if (!userId) break;
+
+        const ref = admin.firestore().collection("users").doc(userId);
+        const snap = await ref.get();
+
+        if (!snap.exists) {
+          console.log(`⚠️ Ignorando webhook: userId ${userId} não existe`);
+          break;
+        }
 
         const updates = {
           subscriptionStatus: "canceled",
@@ -70,15 +97,8 @@ export default async function handler(req, res) {
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         };
 
-        await admin
-          .firestore()
-          .collection("users")
-          .doc(userId)
-          .set(updates, { merge: true });
-
-        console.log(
-          `⚠️ Subscription cancelada ou falha de pagamento (user: ${userId})`
-        );
+        await ref.set(updates, { merge: true });
+        console.log(`⚠️ Subscription cancelada ou falha (user: ${userId})`);
         break;
       }
 
