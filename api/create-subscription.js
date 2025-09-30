@@ -20,10 +20,13 @@ export default async function handler(req, res) {
     const { userId, customerId, priceId } =
       typeof req.body === "string" ? JSON.parse(req.body) : req.body;
 
-    if (!userId || !customerId || !priceId)
+    if (!userId || !customerId || !priceId) {
       return res
         .status(400)
         .json({ error: "userId, customerId e priceId são obrigatórios" });
+    }
+
+    // 🔹 cria a assinatura "incompleta" até o pagamento ser confirmado
     const subscription = await stripe.subscriptions.create({
       customer: customerId,
       items: [{ price: priceId }],
@@ -32,13 +35,19 @@ export default async function handler(req, res) {
       metadata: { userId },
 
       payment_settings: {
-        save_default_payment_method: "on_subscription", // mantém o cartão+dados salvos no cliente
+        save_default_payment_method: "on_subscription", // salva cartão/dados pro futuro
       },
 
       automatic_tax: { enabled: false },
     });
 
-    // Salva dados iniciais da subscription (não marca premium ainda)
+    // 🔹 cria ephemeral key para que o app consiga acessar os billing details do customer
+    const ephemeralKey = await stripe.ephemeralKeys.create(
+      { customer: customerId },
+      { apiVersion: "2023-10-16" }
+    );
+
+    // 🔹 salva dados iniciais no Firestore (não marca como premium ainda)
     await admin.firestore().collection("users").doc(userId).set(
       {
         subscriptionId: subscription.id,
@@ -53,9 +62,11 @@ export default async function handler(req, res) {
       subscription.latest_invoice?.payment_intent?.client_secret || null;
 
     res.status(200).json({
-      clientSecret,
+      clientSecret, // usado no initPaymentSheet
       subscriptionId: subscription.id,
       subscriptionStatus: subscription.status,
+      customerId,
+      ephemeralKey: ephemeralKey.secret, // 🔹 chave efêmera que expira rápido
     });
   } catch (err) {
     console.error("❌ Erro ao criar subscription:", err);
