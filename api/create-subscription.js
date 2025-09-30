@@ -28,9 +28,22 @@ export default async function handler(req, res) {
     const subscription = await stripe.subscriptions.create({
       customer: customerId,
       items: [{ price: priceId }],
-      payment_behavior: "default_incomplete", // importante
+      payment_behavior: "default_incomplete",
       expand: ["latest_invoice.payment_intent"],
       metadata: { userId },
+
+      // 🔹 força a PaymentSheet a coletar nome e endereço
+      payment_settings: {
+        payment_method_options: {
+          card: {
+            request_three_d_secure: "any", // opcional, mas bom para segurança
+          },
+        },
+        save_default_payment_method: "off", // garante que dados vão ser preenchidos
+      },
+
+      // billing info obrigatório
+      automatic_tax: { enabled: false },
     });
 
     // Salva dados iniciais da subscription (não marca premium ainda)
