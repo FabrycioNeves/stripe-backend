@@ -1,3 +1,4 @@
+// api/create-subscription.js
 import Stripe from "stripe";
 import admin from "firebase-admin";
 
@@ -20,34 +21,28 @@ export default async function handler(req, res) {
     const { userId, customerId, priceId } =
       typeof req.body === "string" ? JSON.parse(req.body) : req.body;
 
-    if (!userId || !customerId || !priceId) {
+    if (!userId || !customerId || !priceId)
       return res
         .status(400)
         .json({ error: "userId, customerId e priceId são obrigatórios" });
-    }
 
-    // 🔹 cria a assinatura "incompleta" até o pagamento ser confirmado
+    // 🔹 cria subscription incompleta
     const subscription = await stripe.subscriptions.create({
       customer: customerId,
       items: [{ price: priceId }],
       payment_behavior: "default_incomplete",
       expand: ["latest_invoice.payment_intent"],
       metadata: { userId },
-
-      payment_settings: {
-        save_default_payment_method: "on_subscription", // salva cartão/dados pro futuro
-      },
-
-      automatic_tax: { enabled: false },
     });
 
-    // 🔹 cria ephemeral key para que o app consiga acessar os billing details do customer
-    const ephemeralKey = await stripe.ephemeralKeys.create(
-      { customer: customerId },
-      { apiVersion: "2023-10-16" }
-    );
+    // 🔹 cria SetupIntent para coletar dados do cartão + billing info
+    const setupIntent = await stripe.setupIntents.create({
+      customer: customerId,
+      usage: "off_session", // futuro uso off-session
+      payment_method_types: ["card"],
+    });
 
-    // 🔹 salva dados iniciais no Firestore (não marca como premium ainda)
+    // 🔹 salva no Firestore
     await admin.firestore().collection("users").doc(userId).set(
       {
         subscriptionId: subscription.id,
@@ -58,15 +53,11 @@ export default async function handler(req, res) {
       { merge: true }
     );
 
-    const clientSecret =
-      subscription.latest_invoice?.payment_intent?.client_secret || null;
-
     res.status(200).json({
-      clientSecret, // usado no initPaymentSheet
       subscriptionId: subscription.id,
       subscriptionStatus: subscription.status,
       customerId,
-      ephemeralKey: ephemeralKey.secret, // 🔹 chave efêmera que expira rápido
+      setupIntentClientSecret: setupIntent.client_secret, // 🔹 importante
     });
   } catch (err) {
     console.error("❌ Erro ao criar subscription:", err);
