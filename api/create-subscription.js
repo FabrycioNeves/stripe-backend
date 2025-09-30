@@ -24,7 +24,6 @@ export default async function handler(req, res) {
       return res
         .status(400)
         .json({ error: "userId, customerId e priceId são obrigatórios" });
-
     const subscription = await stripe.subscriptions.create({
       customer: customerId,
       items: [{ price: priceId }],
@@ -32,17 +31,10 @@ export default async function handler(req, res) {
       expand: ["latest_invoice.payment_intent"],
       metadata: { userId },
 
-      // 🔹 força a PaymentSheet a coletar nome e endereço
       payment_settings: {
-        payment_method_options: {
-          card: {
-            request_three_d_secure: "any", // opcional, mas bom para segurança
-          },
-        },
-        save_default_payment_method: "off", // garante que dados vão ser preenchidos
+        save_default_payment_method: "on_subscription", // mantém o cartão+dados salvos no cliente
       },
 
-      // billing info obrigatório
       automatic_tax: { enabled: false },
     });
 
