@@ -1,4 +1,3 @@
-// api/create-subscription.js
 import Stripe from "stripe";
 import admin from "firebase-admin";
 
@@ -26,23 +25,15 @@ export default async function handler(req, res) {
         .status(400)
         .json({ error: "userId, customerId e priceId são obrigatórios" });
 
-    // 🔹 cria subscription incompleta
     const subscription = await stripe.subscriptions.create({
       customer: customerId,
       items: [{ price: priceId }],
-      payment_behavior: "default_incomplete",
+      payment_behavior: "default_incomplete", // importante
       expand: ["latest_invoice.payment_intent"],
       metadata: { userId },
     });
 
-    // 🔹 cria SetupIntent para coletar dados do cartão + billing info
-    const setupIntent = await stripe.setupIntents.create({
-      customer: customerId,
-      usage: "off_session", // futuro uso off-session
-      payment_method_types: ["card"],
-    });
-
-    // 🔹 salva no Firestore
+    // Salva dados iniciais da subscription (não marca premium ainda)
     await admin.firestore().collection("users").doc(userId).set(
       {
         subscriptionId: subscription.id,
@@ -53,11 +44,13 @@ export default async function handler(req, res) {
       { merge: true }
     );
 
+    const clientSecret =
+      subscription.latest_invoice?.payment_intent?.client_secret || null;
+
     res.status(200).json({
+      clientSecret,
       subscriptionId: subscription.id,
       subscriptionStatus: subscription.status,
-      customerId,
-      setupIntentClientSecret: setupIntent.client_secret, // 🔹 importante
     });
   } catch (err) {
     console.error("❌ Erro ao criar subscription:", err);
