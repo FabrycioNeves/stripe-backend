@@ -32,7 +32,6 @@ export default async function handler(req, res) {
       expand: ["latest_invoice.payment_intent"],
       metadata: { userId },
       collection_method: "charge_automatically",
-      default_payment_method: null, // depois será atualizado automaticamente
     });
 
     // Salva dados iniciais da subscription (não marca premium ainda)
