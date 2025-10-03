@@ -1,4 +1,3 @@
-// api/create-customer.js
 import Stripe from "stripe";
 import admin from "firebase-admin";
 
@@ -6,7 +5,6 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
   apiVersion: "2023-10-16",
 });
 
-// Inicializa Firebase Admin
 if (!admin.apps.length) {
   const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
   admin.initializeApp({
@@ -20,7 +18,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { userId, email } =
+    const { userId, email, name, phone, address } =
       typeof req.body === "string" ? JSON.parse(req.body) : req.body;
 
     if (!userId || !email) {
@@ -33,12 +31,22 @@ export default async function handler(req, res) {
     let customerId;
 
     if (userDoc.exists && userDoc.data().customerId) {
-      // Se já existe, usa o mesmo
+      // Atualiza dados do Customer já existente
       customerId = userDoc.data().customerId;
+      await stripe.customers.update(customerId, {
+        email,
+        name,
+        phone,
+        address,
+        metadata: { userId },
+      });
     } else {
-      // Se não existe, cria no Stripe
+      // Cria Customer novo com todos os dados
       const customer = await stripe.customers.create({
         email,
+        name,
+        phone,
+        address,
         metadata: { userId },
       });
 
@@ -50,7 +58,7 @@ export default async function handler(req, res) {
 
     return res.status(200).json({ customerId });
   } catch (err) {
-    console.error("❌ Erro ao criar customer:", err);
+    console.error("❌ Erro ao criar/atualizar customer:", err);
     return res.status(500).json({ error: err.message });
   }
 }

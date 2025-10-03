@@ -28,9 +28,11 @@ export default async function handler(req, res) {
     const subscription = await stripe.subscriptions.create({
       customer: customerId,
       items: [{ price: priceId }],
-      payment_behavior: "default_incomplete", // importante
+      payment_behavior: "default_incomplete",
       expand: ["latest_invoice.payment_intent"],
       metadata: { userId },
+      collection_method: "charge_automatically",
+      default_payment_method: null, // depois será atualizado automaticamente
     });
 
     // Salva dados iniciais da subscription (não marca premium ainda)
